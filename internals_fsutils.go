@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// File and directory permitions.
+// File and directory permissions.
 const (
 	defaultFilePermissions      = 0666
 	defaultDirectoryPermissions = 0767
@@ -45,7 +45,7 @@ func newNotDirectoryError(dname string) *notDirectoryError {
 // Must return 'false' to set aside the given file.
 type fileFilter func(os.FileInfo, *os.File) bool
 
-// filePathFilter is a filtering creteria function for file path.
+// filePathFilter is a filtering criteria function for file path.
 // Must return 'false' to set aside the given file.
 type filePathFilter func(filePath string) bool
 
@@ -363,15 +363,19 @@ func unzip(archiveName string) (map[string][]byte, error) {
 }
 
 // Creates a zip file with the specified file names and byte contents.
-func createZip(archiveName string, files map[string][]byte) error {
-	// Create a buffer to write our archive to.
-	buf := new(bytes.Buffer)
+func createZip(archiveName string, files map[string]io.Reader) error {
+
+	archiveFile, err := os.Create(archiveName)
+	if err != nil {
+		return err
+	}
+	defer archiveFile.Close()
 
 	// Create a new zip archive.
-	w := zip.NewWriter(buf)
+	w := zip.NewWriter(archiveFile)
 
 	// Write files
-	for fpath, fcont := range files {
+	for fpath, freader := range files {
 		header := &zip.FileHeader{
 			Name:   fpath,
 			Method: zip.Deflate,
@@ -382,53 +386,47 @@ func createZip(archiveName string, files map[string][]byte) error {
 		if err != nil {
 			return err
 		}
-		_, err = f.Write([]byte(fcont))
-		if err != nil {
+		if _, err := io.Copy(f, freader); err != nil {
 			return err
 		}
 	}
 
-	// Make sure to check the error on Close.
-	err := w.Close()
-	if err != nil {
-		return err
-	}
-
-	err = ioutil.WriteFile(archiveName, buf.Bytes(), defaultFilePermissions)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	// The Close call writes the checksum, so return the error
+	// instead of just deferring it.
+	return w.Close()
 }
 
-func createTar(files map[string][]byte) ([]byte, error) {
+func createTar(files map[string]io.Reader) ([]byte, error) {
 
 	// Create a buffer to write our archive to.
 	tarBuffer := new(bytes.Buffer)
 	tarWriter := tar.NewWriter(tarBuffer)
 
-	for fpath, fcont := range files {
+	for fpath, freader := range files {
+
+		fcontents, err := ioutil.ReadAll(freader)
+		if err != nil {
+			return nil, err
+		}
 
 		header := &tar.Header{
 			Name:    fpath,
-			Size:    int64(len(fcont)),
+			Size:    int64(len(fcontents)),
 			Mode:    defaultFilePermissions,
 			ModTime: time.Now(),
 		}
 
-		err := tarWriter.WriteHeader(header)
-
-		if err != nil {
+		if err := tarWriter.WriteHeader(header); err != nil {
 			return nil, err
 		}
 
-		_, err = tarWriter.Write(fcont)
-		if err != nil {
+		if _, err := tarWriter.Write(fcontents); err != nil {
 			return nil, err
 		}
 	}
-	tarWriter.Close()
+	if err := tarWriter.Close(); err != nil {
+		return nil, err
+	}
 
 	return tarBuffer.Bytes(), nil
 }
@@ -461,24 +459,24 @@ func unTar(data []byte) (map[string][]byte, error) {
 
 }
 
-func createGzip(archiveName string, content []byte) error {
+func createGzip(archiveName string, content io.Reader) error {
 
-	// Create a buffer to write our archive to.
-	// Make sure to check the error on Close.
-	gzipBuffer := new(bytes.Buffer)
-	gzipWriter := gzip.NewWriter(gzipBuffer)
-
-	_, err := gzipWriter.Write(content)
+	archiveFile, err := os.Create(archiveName)
 	if err != nil {
 		return err
 	}
-	err = gzipWriter.Close()
+	defer archiveFile.Close()
+
+	gzipWriter := gzip.NewWriter(archiveFile)
+
+	_, err = io.Copy(gzipWriter, content)
 	if err != nil {
 		return err
 	}
 
-	return ioutil.WriteFile(archiveName, gzipBuffer.Bytes(), defaultFilePermissions)
-
+	// The Close call writes the checksum, so return the error
+	// instead of just deferring it.
+	return gzipWriter.Close()
 }
 
 func unGzip(filename string) ([]byte, error) {

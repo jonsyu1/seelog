@@ -405,9 +405,6 @@ func (rw *rollingFileWriter) archiveUnexplodedLogs(compressionType compressionTy
 	switch {
 	// Archive exists
 	case err == nil:
-		if err != nil {
-			return err
-		}
 		defer src.Close() // Read-only
 
 		r, err := compressionType.unarchiver(src)

@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// A Reader provides sequential access to the contents of a zip archive.
+// Reader provides sequential access to the contents of a zip archive.
 type Reader struct {
 	zip.Reader
 	unread []*zip.File
@@ -58,7 +58,7 @@ func (r *Reader) Files() []*zip.File {
 	return r.File
 }
 
-// A Writer provides sequential writing of a zip archive.1 format.
+// Writer provides sequential writing of a zip archive.1 format.
 type Writer struct {
 	zip.Writer
 	w io.Writer

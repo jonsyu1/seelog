@@ -149,7 +149,7 @@ var compressionTypes = map[rollingArchiveType]compressionType{
 			return tar.NewWriteMultiCloser(gw, gw)
 		},
 		unarchiver: func(f *os.File) (archive.ReadCloser, error) {
-			gr, err := gzip.NewReader(f)
+			gr, err := gzip.NewReader(f, f.Name())
 			if err != nil {
 				return nil, err
 			}
@@ -382,13 +382,17 @@ func (rw *rollingFileWriter) archiveExplodedLogs(logFilename string, compression
 }
 
 func (rw *rollingFileWriter) archiveUnexplodedLogs(compressionType compressionType, rollsToDelete int, history []string) (err error) {
-	// Buffer to a temporary file
-	dst, err := ioutil.TempFile("", "archived_logs")
+	// Buffer to a temporary file on the same partition
+	tmp := path.Join(path.Dir(rw.archivePath), ".seelog_tmp")
+	if err := os.MkdirAll(tmp, defaultDirectoryPermissions); err != nil {
+		return err
+	}
+	dst, err := ioutil.TempFile(tmp, "archived_logs")
 	if err != nil {
 		return err
 	}
-	defer dst.Close()           // Temporary file
 	defer os.Remove(dst.Name()) // Temporary file
+	defer dst.Close()           // Temporary file
 
 	w := compressionType.archiver(dst, false)
 	defer func() {
@@ -397,11 +401,10 @@ func (rw *rollingFileWriter) archiveUnexplodedLogs(compressionType compressionTy
 		}
 	}()
 
-	_, err = os.Lstat(rw.archivePath)
+	src, err := os.Open(rw.archivePath)
 	switch {
 	// Archive exists
 	case err == nil:
-		src, err := os.Open(rw.archivePath)
 		if err != nil {
 			return err
 		}
@@ -417,12 +420,6 @@ func (rw *rollingFileWriter) archiveUnexplodedLogs(compressionType compressionTy
 			return err
 		}
 
-		// Remove the original file
-		err = tryRemoveFile(rw.archivePath)
-		if err != nil {
-			return err
-		}
-
 	// Failed to stat
 	case !os.IsNotExist(err):
 		return err
@@ -435,12 +432,14 @@ func (rw *rollingFileWriter) archiveUnexplodedLogs(compressionType compressionTy
 		if err != nil {
 			return err
 		}
+		defer src.Close() // Read-only
 		if _, err := io.Copy(w, src); err != nil {
 			return err
 		}
 	}
 
 	// Finalize the roll by moving the file into place
+	dst.Close() // Close file before we rename
 	return os.Rename(dst.Name(), rw.archivePath)
 }
 

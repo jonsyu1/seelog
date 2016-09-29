@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// A Reader provides sequential access to the contents of a tar archive.
+// Reader provides sequential access to the contents of a tar archive.
 type Reader struct {
 	tar.Reader
 }
@@ -25,7 +25,7 @@ func (r *Reader) NextFile() (name string, err error) {
 	return hdr.Name, nil
 }
 
-// A Writer provides sequential writing of a tar archive in POSIX.1 format.
+// Writer provides sequential writing of a tar archive in POSIX.1 format.
 type Writer struct {
 	tar.Writer
 	closers []io.Closer

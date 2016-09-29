@@ -1,4 +1,4 @@
-package tar
+package tar_test
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jonsyu1/seelog/archive/tar"
 	"github.com/jonsyu1/seelog/io/iotest"
 )
 
@@ -50,7 +51,7 @@ func TestWriterAndReader(t *testing.T) {
 // writeFiles iterates through the files we want and writes them as a tarred
 // file.
 func writeFiles(t *testing.T, f *os.File, tname string, want []file) {
-	w := NewWriter(f)
+	w := tar.NewWriter(f)
 	defer w.Close()
 
 	// Write zipped files
@@ -74,7 +75,7 @@ func writeFiles(t *testing.T, f *os.File, tname string, want []file) {
 
 // readFiles iterates through tarred files and ensures they are the same.
 func readFiles(t *testing.T, f *os.File, tname string, want []file) {
-	r := NewReader(f)
+	r := tar.NewReader(f)
 
 	for _, fwant := range want {
 		fname, err := r.NextFile()

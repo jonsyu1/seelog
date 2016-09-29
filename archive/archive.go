@@ -3,6 +3,7 @@ package archive
 import (
 	"archive/tar"
 	"archive/zip"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -61,7 +62,7 @@ func Copy(dst Writer, src Reader) error {
 		if dst, ok := dst.(zipWriter); ok {
 			return copyZip(dst, src)
 		}
-	// Switch on concrete type since there's no special gzip methods.
+	// Switch on concrete type because gzip has no special methods
 	case *gzip.Reader:
 		if dst, ok := dst.(*gzip.Writer); ok {
 			_, err := io.Copy(dst, src)
@@ -91,22 +92,33 @@ func copyBuffer(dst Writer, src Reader) (err error) {
 			return err
 		case nil: // Proceed below
 		}
+
 		// Buffer the file
 		if _, err := io.Copy(buf, src); err != nil {
+			return fmt.Errorf("buffer to disk: %v", err)
+		}
+
+		// Seek to the start of the file for full file copy
+		if _, err := buf.Seek(0, os.SEEK_SET); err != nil {
+			return err
+		}
+
+		// Set desired file permissions
+		if err := os.Chmod(buf.Name(), defaultFileMode); err != nil {
 			return err
 		}
 		fi, err := buf.Stat()
 		if err != nil {
 			return err
 		}
-		os.Chmod(buf.Name(), defaultFileMode)
 
 		// Write the buffered file
 		if err := dst.NextFile(name, fi); err != nil {
+			fmt.Println("Failed to prep writer for next file")
 			return err
 		}
 		if _, err := io.Copy(dst, buf); err != nil {
-			return err
+			return fmt.Errorf("copy to dst: %v", err)
 		}
 		if err := buf.Truncate(0); err != nil {
 			return err

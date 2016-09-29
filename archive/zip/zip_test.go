@@ -1,4 +1,4 @@
-package zip
+package zip_test
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jonsyu1/seelog/archive/zip"
 	"github.com/jonsyu1/seelog/io/iotest"
 )
 
@@ -36,7 +37,7 @@ func TestWriterAndReader(t *testing.T) {
 // writeFiles iterates through the files we want and writes them as a zipped
 // file.
 func writeFiles(t *testing.T, f *os.File, tname string, want map[string][]byte) {
-	w := NewWriter(f)
+	w := zip.NewWriter(f)
 	defer w.Close()
 
 	// Write zipped files
@@ -65,7 +66,7 @@ func readFiles(t *testing.T, f *os.File, tname string, want map[string][]byte) {
 	if err != nil {
 		t.Fatalf("%s: stat zipped file: %v", tname, err)
 	}
-	r, err := NewReader(f, fi.Size())
+	r, err := zip.NewReader(f, fi.Size())
 	if err != nil {
 		t.Fatalf("%s: %v", tname, err)
 	}

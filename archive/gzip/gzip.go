@@ -9,8 +9,8 @@ import (
 	"os"
 )
 
-// A Reader is an io.Reader that can be read to retrieve uncompressed data from
-// a gzip-format compressed file.
+// Reader is an io.Reader that can be read to retrieve uncompressed data from a
+// gzip-format compressed file.
 type Reader struct {
 	gzip.Reader
 	name  string
@@ -18,12 +18,15 @@ type Reader struct {
 }
 
 // NewReader creates a new Reader reading the given reader.
-func NewReader(r io.Reader) (*Reader, error) {
+func NewReader(r io.Reader, name string) (*Reader, error) {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, err
 	}
-	return &Reader{Reader: *gr}, nil
+	return &Reader{
+		Reader: *gr,
+		name:   name,
+	}, nil
 }
 
 // NextFile returns the file name. Calls subsequent to the first call will
@@ -37,14 +40,14 @@ func (r *Reader) NextFile() (name string, err error) {
 	return r.name, nil
 }
 
-// A Writer is an io.WriteCloser. Writes to a Writer are compressed and written to w.
+// Writer is an io.WriteCloser. Writes to a Writer are compressed and written to w.
 type Writer struct {
 	gzip.Writer
 	name        string
 	noMoreFiles bool
 }
 
-// NextFile does nothing, and should never be called more than once.
+// NextFile never returns a next file, and should not be called more than once.
 func (w *Writer) NextFile(name string, _ os.FileInfo) error {
 	if w.noMoreFiles {
 		return fmt.Errorf("gzip: only accepts one file: already received %q and now %q", w.name, name)

@@ -114,7 +114,6 @@ func copyBuffer(dst Writer, src Reader) (err error) {
 
 		// Write the buffered file
 		if err := dst.NextFile(name, fi); err != nil {
-			fmt.Println("Failed to prep writer for next file")
 			return err
 		}
 		if _, err := io.Copy(dst, buf); err != nil {

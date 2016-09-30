@@ -29,7 +29,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -361,7 +360,8 @@ func (rw *rollingFileWriter) archiveExplodedLogs(logFilename string, compression
 	defer src.Close() // Read-only
 
 	// Buffer to a temporary file on the same partition
-	dst, err := rw.tempArchiveFile()
+	// Note: archivePath is a path to a directory when handling exploded logs
+	dst, err := rw.tempArchiveFile(rw.archivePath)
 	if err != nil {
 		return err
 	}
@@ -373,8 +373,8 @@ func (rw *rollingFileWriter) archiveExplodedLogs(logFilename string, compression
 		}
 
 		// Finalize archive by swapping the buffered archive into place
-		archiveFile := path.Clean(rw.archivePath + "/" + compressionType.rollingArchiveTypeName(logFilename, true))
-		err = os.Rename(dst.Name(), archiveFile)
+		err = os.Rename(dst.Name(), filepath.Join(rw.archivePath,
+			compressionType.rollingArchiveTypeName(logFilename, true)))
 	}()
 
 	// archive entry
@@ -399,7 +399,8 @@ func (rw *rollingFileWriter) archiveUnexplodedLogs(compressionType compressionTy
 	}
 
 	// Buffer to a temporary file on the same partition
-	dst, err := rw.tempArchiveFile()
+	// Note: archivePath is a path to a file when handling unexploded logs
+	dst, err := rw.tempArchiveFile(filepath.Dir(rw.archivePath))
 	if err != nil {
 		return err
 	}
@@ -479,7 +480,7 @@ func (rw *rollingFileWriter) deleteOldRolls(history []string) error {
 				rw.archiveExplodedLogs(history[i], compressionTypes[rw.archiveType])
 			}
 		} else {
-			os.MkdirAll(path.Dir(rw.archivePath), defaultDirectoryPermissions)
+			os.MkdirAll(filepath.Dir(rw.archivePath), defaultDirectoryPermissions)
 
 			rw.archiveUnexplodedLogs(compressionTypes[rw.archiveType], rollsToDelete, history)
 		}
@@ -612,8 +613,8 @@ func (rw *rollingFileWriter) Close() error {
 	return nil
 }
 
-func (rw *rollingFileWriter) tempArchiveFile() (*os.File, error) {
-	tmp := path.Join(path.Dir(rw.archivePath), ".seelog_tmp")
+func (rw *rollingFileWriter) tempArchiveFile(archiveDir string) (*os.File, error) {
+	tmp := filepath.Join(archiveDir, ".seelog_tmp")
 	if err := os.MkdirAll(tmp, defaultDirectoryPermissions); err != nil {
 		return nil, err
 	}

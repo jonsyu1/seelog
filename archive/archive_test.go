@@ -2,6 +2,7 @@ package archive_test
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"testing"
 
@@ -13,10 +14,12 @@ import (
 )
 
 const (
-	gzipType = iota
-	tarType
-	zipType
+	gzipType = "gzip"
+	tarType  = "tar"
+	zipType  = "zip"
 )
+
+var types = []string{gzipType, tarType, zipType}
 
 type file struct {
 	name     string
@@ -42,60 +45,37 @@ var (
 	}
 )
 
-var copyTests = map[string]struct {
-	srcType, dstType int
+type testCase struct {
+	srcType, dstType string
 	in               []file
-}{
-	"zip to zip": {
-		srcType: zipType,
-		dstType: zipType,
-		in:      twoFiles,
-	},
-	"zip to tar": {
-		srcType: zipType,
-		dstType: tarType,
-		in:      twoFiles,
-	},
-	"zip to gzip": {
-		srcType: zipType,
-		dstType: gzipType,
-		in:      oneFile,
-	},
-	"tar to tar": {
-		srcType: zipType,
-		dstType: tarType,
-		in:      twoFiles,
-	},
-	"tar to gzip": {
-		srcType: zipType,
-		dstType: tarType,
-		in:      oneFile,
-	},
-	"tar to zip": {
-		srcType: zipType,
-		dstType: tarType,
-		in:      twoFiles,
-	},
-	"gzip to gzip": {
-		srcType: zipType,
-		dstType: tarType,
-		in:      oneFile,
-	},
-	"gzip to tar": {
-		srcType: zipType,
-		dstType: tarType,
-		in:      oneFile,
-	},
-	"gzip to zip": {
-		srcType: zipType,
-		dstType: tarType,
-		in:      oneFile,
-	},
+}
+
+func copyTests() map[string]testCase {
+	// types X types X files
+	tests := make(map[string]testCase, len(types)*len(types)*2)
+	for _, srct := range types {
+		for _, dstt := range types {
+			tests[fmt.Sprintf("%s to %s: one file", srct, dstt)] = testCase{
+				srcType: srct,
+				dstType: dstt,
+				in:      oneFile,
+			}
+			// gzip does not handle more than one file
+			if srct != gzipType && dstt != gzipType {
+				tests[fmt.Sprintf("%s to %s: two files", srct, dstt)] = testCase{
+					srcType: srct,
+					dstType: dstt,
+					in:      twoFiles,
+				}
+			}
+		}
+	}
+	return tests
 }
 
 func TestCopy(t *testing.T) {
-	var srcb, dstb bytes.Buffer
-	for tname, tt := range copyTests {
+	srcb, dstb := new(bytes.Buffer), new(bytes.Buffer)
+	for tname, tt := range copyTests() {
 		// Reset buffers between tests
 		srcb.Reset()
 		dstb.Reset()
@@ -104,7 +84,7 @@ func TestCopy(t *testing.T) {
 		var fname string
 
 		// Seed the src
-		srcw := writer(t, tname, &srcb, tt.srcType)
+		srcw := writer(t, tname, srcb, tt.srcType)
 		for _, f := range tt.in {
 			srcw.NextFile(f.name, iotest.FileInfo(t, f.contents))
 			mustCopy(t, tname, srcw, bytes.NewReader(f.contents))
@@ -113,8 +93,8 @@ func TestCopy(t *testing.T) {
 		mustClose(t, tname, srcw)
 
 		// Perform the copy
-		srcr := reader(t, tname, &srcb, tt.srcType, fname)
-		dstw := writer(t, tname, &dstb, tt.dstType)
+		srcr := reader(t, tname, srcb, tt.srcType, fname)
+		dstw := writer(t, tname, dstb, tt.dstType)
 		if err := archive.Copy(dstw, srcr); err != nil {
 			t.Fatalf("%s: %v", tname, err)
 		}
@@ -122,15 +102,18 @@ func TestCopy(t *testing.T) {
 		mustClose(t, tname, dstw)
 
 		// Read back dst to confirm our expectations
-		dstr := reader(t, tname, &dstb, tt.dstType, fname)
+		dstr := reader(t, tname, dstb, tt.dstType, fname)
 		for _, want := range tt.in {
-			var (
-				got file
-				buf bytes.Buffer
-			)
-			got.name, _ = dstr.NextFile()
-			mustCopy(t, tname, &buf, dstr)
-			got.contents = buf.Bytes()
+			buf := new(bytes.Buffer)
+			name, err := dstr.NextFile()
+			if err != nil {
+				t.Fatalf("%s: %v", tname, err)
+			}
+			mustCopy(t, tname, buf, dstr)
+			got := file{
+				name:     name,
+				contents: buf.Bytes(),
+			}
 
 			switch {
 			case got.name != want.name:
@@ -146,7 +129,7 @@ func TestCopy(t *testing.T) {
 	}
 }
 
-func writer(t *testing.T, tname string, w io.Writer, atype int) archive.WriteCloser {
+func writer(t *testing.T, tname string, w io.Writer, atype string) archive.WriteCloser {
 	switch atype {
 	case gzipType:
 		return gzip.NewWriter(w)
@@ -155,11 +138,11 @@ func writer(t *testing.T, tname string, w io.Writer, atype int) archive.WriteClo
 	case zipType:
 		return zip.NewWriter(w)
 	}
-	t.Fatalf("%s: unrecognized archive type: %d", tname, atype)
+	t.Fatalf("%s: unrecognized archive type: %s", tname, atype)
 	panic("execution continued after (*testing.T).Fatalf")
 }
 
-func reader(t *testing.T, tname string, buf *bytes.Buffer, atype int, fname string) archive.ReadCloser {
+func reader(t *testing.T, tname string, buf *bytes.Buffer, atype string, fname string) archive.ReadCloser {
 	switch atype {
 	case gzipType:
 		gr, err := gzip.NewReader(buf, fname)
@@ -178,7 +161,7 @@ func reader(t *testing.T, tname string, buf *bytes.Buffer, atype int, fname stri
 		}
 		return archive.NopCloser(zr)
 	}
-	t.Fatalf("%s: unrecognized archive type: %d", tname, atype)
+	t.Fatalf("%s: unrecognized archive type: %s", tname, atype)
 	panic("execution continued after (*testing.T).Fatalf")
 }
 

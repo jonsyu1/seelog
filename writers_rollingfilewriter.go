@@ -347,6 +347,12 @@ func (rw *rollingFileWriter) createFileAndFolderIfNeeded(first bool) error {
 }
 
 func (rw *rollingFileWriter) archiveExplodedLogs(logFilename string, compressionType compressionType) (err error) {
+	closeWithError := func(c io.Closer) {
+		if cerr := c.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
+
 	rollPath := filepath.Join(rw.currentDirPath, logFilename)
 	src, err := os.Open(rollPath)
 	if err != nil {
@@ -354,52 +360,62 @@ func (rw *rollingFileWriter) archiveExplodedLogs(logFilename string, compression
 	}
 	defer src.Close() // Read-only
 
-	archiveFile := path.Clean(rw.archivePath + "/" + compressionType.rollingArchiveTypeName(logFilename, true))
-	dst, err := os.Create(archiveFile)
+	// Buffer to a temporary file on the same partition
+	dst, err := rw.tempArchiveFile()
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if cerr := dst.Close(); cerr != nil && err == nil {
-			err = cerr
+		closeWithError(dst)
+		if err != nil {
+			os.Remove(dst.Name()) // Can't do anything when we fail to remove temp file
+			return
 		}
+
+		// Finalize archive by swapping the buffered archive into place
+		archiveFile := path.Clean(rw.archivePath + "/" + compressionType.rollingArchiveTypeName(logFilename, true))
+		err = os.Rename(dst.Name(), archiveFile)
 	}()
 
 	// archive entry
 	w := compressionType.archiver(dst, true)
-	defer func() {
-		if cerr := w.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeWithError(w)
 	fi, err := src.Stat()
 	if err != nil {
 		return err
 	}
-	w.NextFile(logFilename, fi)
+	if err := w.NextFile(logFilename, fi); err != nil {
+		return err
+	}
 	_, err = io.Copy(w, src)
 	return err
 }
 
 func (rw *rollingFileWriter) archiveUnexplodedLogs(compressionType compressionType, rollsToDelete int, history []string) (err error) {
-	// Buffer to a temporary file on the same partition
-	tmp := path.Join(path.Dir(rw.archivePath), ".seelog_tmp")
-	if err := os.MkdirAll(tmp, defaultDirectoryPermissions); err != nil {
-		return err
+	closeWithError := func(c io.Closer) {
+		if cerr := c.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
 	}
-	dst, err := ioutil.TempFile(tmp, "archived_logs")
+
+	// Buffer to a temporary file on the same partition
+	dst, err := rw.tempArchiveFile()
 	if err != nil {
 		return err
 	}
-	defer os.Remove(dst.Name()) // Temporary file
-	defer dst.Close()           // Temporary file
+	defer func() {
+		closeWithError(dst)
+		if err != nil {
+			os.Remove(dst.Name()) // Can't do anything when we fail to remove temp file
+			return
+		}
+
+		// Finalize archive by moving the buffered archive into place
+		err = os.Rename(dst.Name(), rw.archivePath)
+	}()
 
 	w := compressionType.archiver(dst, false)
-	defer func() {
-		if cerr := w.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
+	defer closeWithError(w)
 
 	src, err := os.Open(rw.archivePath)
 	switch {
@@ -430,14 +446,18 @@ func (rw *rollingFileWriter) archiveUnexplodedLogs(compressionType compressionTy
 			return err
 		}
 		defer src.Close() // Read-only
+		fi, err := src.Stat()
+		if err != nil {
+			return err
+		}
+		if err := w.NextFile(src.Name(), fi); err != nil {
+			return err
+		}
 		if _, err := io.Copy(w, src); err != nil {
 			return err
 		}
 	}
-
-	// Finalize the roll by moving the file into place
-	dst.Close() // Close file before we rename
-	return os.Rename(dst.Name(), rw.archivePath)
+	return nil
 }
 
 func (rw *rollingFileWriter) deleteOldRolls(history []string) error {
@@ -590,6 +610,14 @@ func (rw *rollingFileWriter) Close() error {
 		rw.currentFile = nil
 	}
 	return nil
+}
+
+func (rw *rollingFileWriter) tempArchiveFile() (*os.File, error) {
+	tmp := path.Join(path.Dir(rw.archivePath), ".seelog_tmp")
+	if err := os.MkdirAll(tmp, defaultDirectoryPermissions); err != nil {
+		return nil, err
+	}
+	return ioutil.TempFile(tmp, "archived_logs")
 }
 
 // =============================================================================================
